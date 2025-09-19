@@ -142,18 +142,37 @@ export class CheckoutRepository {
     return await SelectQuery(query, [userId, limit]);
   }
 
-  async getOrderDetails(orderId: number, userId: number) {
-    const orderQuery = `
-      SELECT * FROM orders 
-      WHERE id = $1 AND user_id = $2
-    `;
-    const orderResult = await SelectQuery(orderQuery, [orderId, userId]);
+  async getOrderDetails(orderIdentifier: string | number, userId: number) {
+    // Check if orderIdentifier is a number (ID) or string (order number)
+    const isOrderNumber = typeof orderIdentifier === 'string' && orderIdentifier.startsWith('ORD-');
+
+    let orderQuery: string;
+    let params: any[];
+
+    if (isOrderNumber) {
+      // Search by order number
+      orderQuery = `
+        SELECT * FROM orders
+        WHERE order_number = $1 AND user_id = $2
+      `;
+      params = [orderIdentifier, userId];
+    } else {
+      // Search by order ID
+      orderQuery = `
+        SELECT * FROM orders
+        WHERE id = $1 AND user_id = $2
+      `;
+      params = [orderIdentifier, userId];
+    }
+
+    const orderResult = await SelectQuery(orderQuery, params);
 
     if (orderResult.length === 0) {
       return null;
     }
 
     const order = orderResult[0];
+    const actualOrderId = order.id;
 
     const itemsQuery = `
       SELECT oi.*, p.featured_image_url
@@ -161,7 +180,7 @@ export class CheckoutRepository {
       LEFT JOIN products p ON oi.product_id = p.id
       WHERE oi.order_id = $1
     `;
-    const items = await SelectQuery(itemsQuery, [orderId]);
+    const items = await SelectQuery(itemsQuery, [actualOrderId]);
 
     const vendorOrdersQuery = `
       SELECT vo.*, v.store_name
@@ -169,7 +188,7 @@ export class CheckoutRepository {
       LEFT JOIN vendors v ON vo.vendor_id = v.id
       WHERE vo.order_id = $1
     `;
-    const vendorOrders = await SelectQuery(vendorOrdersQuery, [orderId]);
+    const vendorOrders = await SelectQuery(vendorOrdersQuery, [actualOrderId]);
 
     return {
       ...order,
@@ -179,14 +198,70 @@ export class CheckoutRepository {
   }
   async getShippingMethods(countryId?: number) {
     const query = `
-      SELECT sm.*, sz.name as zone_name 
+      SELECT sm.*, sz.name as zone_name
       FROM shipping_methods sm
       LEFT JOIN shipping_zones sz ON sm.zone_id = sz.id
-      WHERE sm.is_active = true 
+      WHERE sm.is_active = true
       ${countryId ? 'AND $1 = ANY(sz.countries)' : ''}
       ORDER BY sm.sort_order ASC
     `;
     const params = countryId ? [countryId] : [];
     return await SelectQuery(query, params);
+  }
+
+  async getCurrencies() {
+    const query = `
+      SELECT * FROM currencies
+      WHERE is_active = true
+      ORDER BY code ASC
+    `;
+    return await SelectQuery(query);
+  }
+
+  async getCountries() {
+    const query = `
+      SELECT * FROM countries
+      WHERE is_active = true
+      ORDER BY name ASC
+    `;
+    return await SelectQuery(query);
+  }
+
+  async getPaymentMethods() {
+    const query = `
+      SELECT id, name, code, type, provider, supported_countries, supported_currencies,
+             configuration, is_active, sort_order
+      FROM payment_methods
+      WHERE is_active = true
+      ORDER BY sort_order ASC
+    `;
+    return await SelectQuery(query);
+  }
+
+  async getIntegrations() {
+    const query = `
+      SELECT id, name, type, provider, configuration, credentials, is_active
+      FROM integrations
+      WHERE is_active = true
+      ORDER BY type, name
+    `;
+    return await SelectQuery(query);
+  }
+
+  async getSystemSettings() {
+    const query = `
+      SELECT * FROM settings
+      WHERE category = 'checkout'
+      ORDER BY setting_key ASC
+    `;
+    const result = await SelectQuery(query);
+
+    // Convert to key-value object
+    const settings = {};
+    result.forEach(setting => {
+      settings[setting.setting_key] = setting.setting_value;
+    });
+
+    return settings;
   }
 }

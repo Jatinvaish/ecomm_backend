@@ -585,7 +585,7 @@ export class QueryBuilder {
 
     // Filter out undefined and null values
     const validValues = values.filter(value => value !== undefined && value !== null);
-    
+
     if (validValues.length === 0) {
       return this;
     }
@@ -593,16 +593,16 @@ export class QueryBuilder {
     // Replace all ? placeholders with $n parameters
     let updatedCondition = condition;
     let replacementCount = 0;
-    
+
     for (const value of validValues) {
       updatedCondition = updatedCondition.replace('?', `$${this.paramIndex + replacementCount}`);
       replacementCount++;
     }
-    
+
     this.conditions.push(updatedCondition);
     this.params.push(...validValues);
     this.paramIndex += validValues.length;
-    
+
     return this;
   }
 

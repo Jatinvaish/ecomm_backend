@@ -24,8 +24,11 @@ export class PaymentService {
 
   async createPaymentIntent(payment_data: PaymentIntentDto, user_id: number) {
     try {
+      console.log(`🔄 Creating payment intent for user ${user_id}, method: ${payment_data.payment_method_code}, amount: ${payment_data.amount}`);
+
       const payment_method = await this.paymentRepository.getPaymentMethodByCode(payment_data.payment_method_code);
       if (!payment_method) {
+        console.error(`❌ Invalid payment method: ${payment_data.payment_method_code}`);
         throw new BadRequestException('Invalid payment method');
       }
 
@@ -33,53 +36,121 @@ export class PaymentService {
 
       switch (payment_data.payment_method_code) {
         case 'stripe_card':
+          console.log('💳 Processing Stripe payment intent');
           result = await this.createStripeIntent(payment_data, user_id);
           break;
 
         case 'razorpay':
-          result = await this.createRazorpayOrder(payment_data, user_id);
+          console.log('💰 Processing Razorpay payment intent');
+          result = await this.createRazorpayIntent(payment_data, user_id);
           break;
 
         case 'cod':
+          console.log('💵 Processing Cash on Delivery');
           result = {
             provider: 'cod',
-            message: 'Cash on Delivery selected'
+            message: 'Cash on Delivery selected',
+            amount: payment_data.amount,
+            currency: payment_data.currency
           };
           break;
 
         default:
+          console.error(`❌ Unsupported payment method: ${payment_data.payment_method_code}`);
           throw new BadRequestException('Unsupported payment method');
       }
 
+      console.log(`✅ Payment intent created successfully: ${JSON.stringify(result)}`);
       return ApiResponse.success({ result });
     } catch (error) {
+      console.error(`❌ Payment intent creation failed: ${error.message}`, error.stack);
       throw new BadRequestException(`Payment intent creation failed: ${error.message}`);
     }
   }
 
   private async createStripeIntent(payment_data: PaymentIntentDto, user_id: number) {
-    const config = await this.integrationService.getPaymentConfig('stripe');
-    if (!config) {
-      throw new BadRequestException('Stripe not configured');
+    try {
+      console.log(`🔄 Creating Stripe payment intent`);
+
+      const config = await this.integrationService.getPaymentConfig('stripe');
+
+      if (!config) {
+        console.error(`❌ Stripe not configured`);
+        throw new BadRequestException('Stripe not configured');
+      }
+
+      console.log(`✅ Stripe config found, creating payment intent`);
+
+      const stripe = new Stripe(config.credentials.api_key, {
+        apiVersion: null,
+      });
+
+      const payment_intent = await stripe.paymentIntents.create({
+        amount: Math.round(payment_data.amount * 100),
+        currency: payment_data.currency.toLowerCase(),
+        metadata: {
+          user_id: user_id.toString(),
+          payment_method: payment_data.payment_method_code
+        },
+      });
+
+      console.log(`✅ Stripe payment intent created: ${payment_intent.id}`);
+      return {
+        client_secret: payment_intent.client_secret,
+        payment_intent_id: payment_intent.id,
+        provider: 'stripe',
+        amount: payment_data.amount,
+        currency: payment_data.currency
+      };
+    } catch (error) {
+      console.error(`❌ Error creating Stripe payment intent: ${error.message}`, error);
+      throw new BadRequestException(`Stripe payment intent creation failed: ${error.message}`);
     }
+  }
 
-    const stripe = new Stripe(config.credentials.api_key, {
-      apiVersion: null,
-    });
+  private async createRazorpayIntent(payment_data: PaymentIntentDto, user_id: number) {
+    try {
+      console.log(`🔄 Creating Razorpay payment intent`);
 
-    const payment_intent = await stripe.paymentIntents.create({
-      amount: Math.round(payment_data.amount * 100),
-      currency: payment_data.currency.toLowerCase(),
-      metadata: {
-        user_id: user_id.toString(),
-      },
-    });
+      const config = await this.integrationService.getPaymentConfig('razorpay');
 
-    return {
-      client_secret: payment_intent.client_secret,
-      payment_intent_id: payment_intent.id,
-      provider: 'stripe'
-    };
+      if (!config) {
+        console.error(`❌ Razorpay not configured`);
+        throw new BadRequestException('Razorpay not configured');
+      }
+
+      console.log(`✅ Razorpay config found, creating order`);
+
+      const Razorpay = require('razorpay');
+      const razorpay = new Razorpay({
+        key_id: config.credentials.key_id,
+        key_secret: config.credentials.key_secret,
+      });
+
+      const order = await razorpay.orders.create({
+        amount: Math.round(payment_data.amount * 100), // Convert to paisa
+        currency: payment_data.currency.toUpperCase(),
+        receipt: `receipt_${user_id}_${Date.now()}`,
+        notes: {
+          user_id: user_id.toString(),
+          payment_method: payment_data.payment_method_code
+        },
+      });
+
+      console.log(`✅ Razorpay order created: ${order.id}`);
+      return {
+        order_id: order.id,
+        client_secret: order.id, // Use order ID as client secret for Razorpay
+        payment_intent_id: order.id,
+        provider: 'razorpay',
+        amount: payment_data.amount,
+        currency: payment_data.currency,
+        razorpay_key_id: config.credentials.key_id
+      };
+    } catch (error) {
+      console.error(`❌ Error creating Razorpay payment intent: ${error.message}`, error);
+      throw new BadRequestException(`Razorpay payment intent creation failed: ${error.message}`);
+    }
   }
 
   private async createRazorpayOrder(payment_data: PaymentIntentDto, user_id: number) {
@@ -113,42 +184,71 @@ export class PaymentService {
   }
 
   async processPayment(order: any, payment_method_id: number, client: PoolClient): Promise<ApiResponseFormat<any>> {
-    const payment_method = await this.paymentRepository.getPaymentMethodById(payment_method_id);
-    if (!payment_method) {
-      throw new BadRequestException('Invalid payment method');
-    }
+    try {
+      console.log(`🔄 Processing payment for order ${order.id}, payment method ${payment_method_id}`);
 
-    // Create payment transaction record
-    const transaction_data = {
-      order_id: order.id,
-      user_id: order.user_id,
-      payment_method_id: payment_method_id,
-      amount: order.total_amount,
-      currency_id: order.currency_id,
-      status: payment_method.code === 'cod' ? 'completed' : 'pending',
-      transaction_type: 'payment',
-      provider_payment_id: payment_method.code === 'cod' ? null : `pending_${Date.now()}`
-    };
+      const payment_method = await this.paymentRepository.getPaymentMethodById(payment_method_id);
+      if (!payment_method) {
+        console.error(`❌ Invalid payment method ID: ${payment_method_id}`);
+        throw new BadRequestException('Invalid payment method');
+      }
 
-    await this.paymentRepository.createPaymentTransaction(transaction_data, client);
+      console.log(`✅ Payment method found: ${payment_method.code}`);
 
-    if (payment_method.code === 'cod') {
-      // Update order status for COD
+      // Create payment transaction record
+      const transaction_data = {
+        order_id: order.id,
+        user_id: order.user_id,
+        payment_method_id: payment_method_id,
+        amount: order.total_amount,
+        currency_id: order.currency_id,
+        status: payment_method.code === 'cod' ? 'completed' : 'pending',
+        transaction_type: 'payment',
+        provider_payment_id: payment_method.code === 'cod' ? null : `pending_${Date.now()}`
+      };
+
+      console.log(`💾 Creating payment transaction: ${JSON.stringify(transaction_data)}`);
+      const transaction = await this.paymentRepository.createPaymentTransaction(transaction_data, client);
+      console.log(`✅ Payment transaction created with ID: ${transaction.id}`);
+
+      if (payment_method.code === 'cod') {
+        console.log('💵 Processing Cash on Delivery payment');
+
+        // Update order status for COD
+        await client.query(
+          'UPDATE orders SET status = $1, payment_status = $2, updated_at = NOW() WHERE id = $3',
+          ['confirmed', 'pending', order.id]
+        );
+
+        console.log(`✅ COD order confirmed: ${order.id}`);
+        return ApiResponse.success({
+          payment_method: 'cod',
+          transaction_id: transaction.id,
+          message: 'Order confirmed. Payment will be collected on delivery.',
+          order_status: 'confirmed',
+          payment_status: 'pending'
+        });
+      }
+
+      // For online payments (Stripe/Razorpay), update to processing status
       await client.query(
         'UPDATE orders SET status = $1, payment_status = $2, updated_at = NOW() WHERE id = $3',
-        ['confirmed', 'pending', order.id]
+        ['processing', 'pending', order.id]
       );
 
+      console.log(`✅ Online payment initiated for order: ${order.id}`);
       return ApiResponse.success({
-        payment_method: 'cod',
-        message: 'Order confirmed. Payment will be collected on delivery.'
+        payment_method: payment_method.code,
+        transaction_id: transaction.id,
+        message: 'Payment processing initiated. Please complete the payment.',
+        order_status: 'processing',
+        payment_status: 'pending',
+        provider: payment_method.provider
       });
+    } catch (error) {
+      console.error(`❌ Error processing payment: ${error.message}`, error.stack);
+      throw new BadRequestException(`Payment processing failed: ${error.message}`);
     }
-
-    return ApiResponse.success({
-      payment_method: payment_method.code,
-      message: 'Payment processing initiated'
-    });
   }
 
   async handleWebhook(provider: string, payload: any, signature: string) {
@@ -234,22 +334,43 @@ export class PaymentService {
   }
 
   private async handleRazorpayWebhook(event: any) {
-    switch (event.event) {
-      case 'payment.captured':
-        await this.updatePaymentStatus(
-          event.payload.payment.entity.order_id,
-          'completed',
-          'razorpay'
-        );
-        break;
+    try {
+      console.log(`🔄 Processing Razorpay webhook: ${event.event}`);
 
-      case 'payment.failed':
-        await this.updatePaymentStatus(
-          event.payload.payment.entity.order_id,
-          'failed',
-          'razorpay'
-        );
-        break;
+      switch (event.event) {
+        case 'payment.captured':
+          console.log(`✅ Payment captured for order: ${event.payload.payment.entity.order_id}`);
+          await this.updatePaymentStatus(
+            event.payload.payment.entity.order_id,
+            'completed',
+            'razorpay'
+          );
+          break;
+
+        case 'payment.failed':
+          console.log(`❌ Payment failed for order: ${event.payload.payment.entity.order_id}`);
+          await this.updatePaymentStatus(
+            event.payload.payment.entity.order_id,
+            'failed',
+            'razorpay'
+          );
+          break;
+
+        case 'order.paid':
+          console.log(`💰 Order paid: ${event.payload.order.entity.id}`);
+          await this.updatePaymentStatus(
+            event.payload.order.entity.id,
+            'completed',
+            'razorpay'
+          );
+          break;
+
+        default:
+          console.log(`⚠️ Unhandled Razorpay webhook event: ${event.event}`);
+      }
+    } catch (error) {
+      console.error(`❌ Error handling Razorpay webhook: ${error.message}`, error);
+      throw error;
     }
   }
 

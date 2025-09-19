@@ -36,6 +36,11 @@ export class CheckoutController {
     return await this.paymentService.getActivePaymentMethods();
   }
 
+  @Get('config')
+  async getCheckoutConfig() {
+    return await this.checkoutService.getCheckoutConfig();
+  }
+
   @Get('shipping-methods/:addressId')
   async getShippingMethods(@Param('addressId') addressId: number) {
     return await this.checkoutService.getShippingMethods(addressId);
@@ -48,13 +53,13 @@ export class CheckoutController {
   }
 
   @Get('orders/:orderId')
-  async getOrderDetails(@Param('orderId') orderId: number, @Req() req) {
+  async getOrderDetails(@Param('orderId') orderId: string, @Req() req) {
     const userId = req.user?.id || 1; // Mock user ID for testing
     return await this.checkoutService.getOrderDetails(orderId, userId);
   }
 
   @Get('orders/:orderId/track')
-  async trackOrder(@Param('orderId') orderId: number, @Req() req) {
+  async trackOrder(@Param('orderId') orderId: string, @Req() req) {
     const userId = req.user?.id || 1; // Mock user ID for testing
     return await this.checkoutService.trackOrder(orderId, userId);
   }

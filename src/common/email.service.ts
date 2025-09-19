@@ -185,10 +185,19 @@ export class EmailService {
       }
 
       private replaceTemplateVariables(templateContent: string, data: { [key: string]: any }): string {
-        return templateContent.replace(/\$\{\s*([\w.]+)\s*\}/g, (_, path) => {
+        // First try the ${{variable}} format (current active method)
+        let result = templateContent.replace(/\$\{\s*([\w.]+)\s*\}/g, (_, path) => {
           const value = this.getNestedValue(data, path);
           return value !== undefined && value !== null ? String(value) : '';
         });
+
+        // Also support {{variable}} format for backward compatibility
+        result = result.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, path) => {
+          const value = this.getNestedValue(data, path);
+          return value !== undefined && value !== null ? String(value) : '';
+        });
+
+        return result;
       }
   /**
    * Sends an email by fetching the template from the database,

@@ -46,16 +46,17 @@ export class OrderRepository {
     console.log("🚀 ~ OrderRepository ~ orderItemData:", orderItemData)
     const query = `
       INSERT INTO order_items (
-        order_id, product_id, combination_id, product_name, product_sku,
+        order_id,vendor_order_id, product_id, combination_id, product_name, product_sku,
         variant_details, quantity, unit_price, total_price, tax_rate, tax_amount
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *
     `;
     
     const values = [
       orderItemData?.order_id,
+      orderItemData?.vendor_order_id,
       orderItemData?.product_id,
-      orderItemData?.combination_id || 0,
+      orderItemData?.combination_id || null,
       orderItemData?.product_name,
       orderItemData?.product_sku,
       orderItemData?.variant_details ? JSON.stringify(orderItemData.variant_details) : null,

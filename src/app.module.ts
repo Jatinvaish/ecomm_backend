@@ -18,6 +18,7 @@ import { WishlistModule } from './modules/wishlist/wishlist.module';
 import { UserAddressModule } from './modules/user-addresses/user-addresses.module';
 import { AttributesModule } from './modules/attributes/attributes.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
+import { OrdersModule } from './modules/orders/orders.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { CheckoutModule } from './modules/checkout/checkout.module';
     WishlistModule,
     UserAddressModule,
     CheckoutModule,
+    OrdersModule,
   ],
   controllers: [AppController, MasterApisController],
   providers: [AppService, MasterApisService],
